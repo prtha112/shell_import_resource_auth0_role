@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+
+domain=$(grep "domain = " main.tf | sed -e "s/domain = / /g" -e "s/\"//g")
+tokens=$(grep "api_token = " main.tf | sed -e "s/api_token = / /g" -e "s/\"//g")
+
+curl --location --request GET "${domain}" \
+--header "Authorization: Bearer ${tokens}" \
+--output role_response.json
+
+response=$(sed -e "s/ /_/g; s/(//g; s/)//g;" < role_response.json)
+
+echo $response > role_response.json 
+echo "" > role_temp.tf
+echo "" > role.tf
+
+jq -c '.[]' role_response.json | while read i; do
+    resource_id=$(echo $i | jq -r ".id")
+    resource_name=$(echo $i | jq -r ".name" | sed -e "s/\\[//g;" -e "s/\\]//g;")
+    resource="resource \"auth0_role\" \"role_${resource_name}\" {}"
+    echo $resource >> role_temp.tf
+    terraform import "auth0_role.role_${resource_name}" $resource_id
+    echo "" > role_temp.tf
+    terraform state show -no-color "auth0_role.role_${resource_name}" >> role.tf 
+done
+
+grep -v "id          =" role.tf > tmpfile && mv tmpfile role.tf
+rm role_temp.tf
+rm role_response.json
